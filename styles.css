@@ -136,3 +136,17 @@
 .igc-hint { font-size: 12px; color: var(--text-faint); }
 .igc-narrow .igc-h-right { flex-wrap: wrap; width: 100%; row-gap: 4px; justify-content: space-between; }
 .igc-narrow .igc-add { margin-left: auto; }
+
+/* v0.3 */
+.igc-side.closed { display: none; }
+.igc-narrow .igc-side.closed { display: none; }
+.igc-menu-btn { display: inline-flex !important; align-items: center; }
+.igc-more { cursor: pointer; border-radius: 4px; }
+.igc-more:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.igc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.igc-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 500; background: var(--background-modifier-hover); color: var(--text-normal); border: none; box-shadow: none; height: auto; cursor: pointer; font-family: var(--igc-font); }
+.igc-chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.igc-chip.on { background: color-mix(in srgb, var(--c) 18%, var(--background-primary)); outline: 1.5px solid var(--c); font-weight: 600; }
+.igc-chips.fixed .igc-chip { cursor: default; }
+.igc-daymodal-list { max-height: 55vh; overflow: auto; margin: 0 -8px; }
+.igc-daymodal .igc-row { padding-left: 8px; padding-right: 8px; }

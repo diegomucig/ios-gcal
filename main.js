@@ -28,6 +28,7 @@ const DEFAULTS = {
   weekStartsMonday: true,
   hidden: {},
   lastView: 'month',
+  sidebarClosed: false,
 };
 
 /* ---------- utilità data ---------- */
@@ -131,6 +132,16 @@ module.exports = class IosGcalPlugin extends Plugin {
         const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
         const giorno = fm && fm.Data ? String(fm.Data).slice(0, 10) : '';
         if (!/^\d{4}-\d{2}-\d{2}$/.test(giorno)) continue;
+        if (String(fm.Categoria || '').trim() === CAT_GARA && fm.Nome) { // le gare vanno subito in Fencing, nella cartella della stagione
+          const safe = safeName(String(fm.Nome)) || 'Gara';
+          const base = `${giorno} ${safe}`, cart = `${FENCING}/${stagione(giorno)}/${base}`;
+          let cur = '';
+          for (const part of cart.split('/')) { cur = cur ? cur + '/' + part : part; if (!this.app.vault.getAbstractFileByPath(cur)) await this.app.vault.createFolder(cur); }
+          let dp = `${cart}/${base}.md`;
+          if (this.app.vault.getAbstractFileByPath(dp)) dp = `${cart}/${base} - ${Date.now()}.md`;
+          try { await this.app.fileManager.renameFile(f, dp); } catch (e) { /* riprova */ }
+          continue;
+        }
         const inFuturi = f.path.startsWith(FUTURI + '/');
         const dest = inFuturi ? (giorno < oggi ? PASSATI : null) : (giorno >= oggi ? FUTURI : null);
         if (!dest) continue;
@@ -502,14 +513,10 @@ class CalendarView extends ItemView {
     this.applySize();
 
     const shell = h('div', 'igc-shell', null, root);
-    const side = h('aside', 'igc-side' + (this.sidebarOpen ? ' open' : ''), null, shell);
+    const side = h('aside', 'igc-side' + (this.sidebarOpen ? ' open' : '') + (this.plugin.settings.sidebarClosed ? ' closed' : ''), null, shell);
     this.renderSidebar(side);
     const main = h('div', 'igc-main', null, shell);
     this.renderHeader(main);
-    if (this.plugin.calendarsLimited) {
-      const n = h('div', 'igc-banner', 'Vedo solo i 3 calendari della configurazione. Per elencare tutti i calendari con i loro colori serve il permesso aggiuntivo "calendarlist.readonly" (vedi istruzioni).', main);
-      n.dataset.kind = 'limited';
-    }
     if (this.error) h('div', 'igc-banner igc-error', this.error, main);
     const body = h('div', 'igc-body', null, main);
     if (this.loading) h('div', 'igc-loading', 'Carico…', body);
@@ -547,7 +554,11 @@ class CalendarView extends ItemView {
     const menu = h('button', 'igc-icon-btn igc-menu-btn', null, left);
     menu.setAttribute('aria-label', 'Calendari');
     setIcon(menu, 'calendar-days');
-    menu.addEventListener('click', () => { this.sidebarOpen = !this.sidebarOpen; this.render(); });
+    menu.addEventListener('click', async () => {
+      if (this.contentEl.classList.contains('igc-narrow')) this.sidebarOpen = !this.sidebarOpen;
+      else { this.plugin.settings.sidebarClosed = !this.plugin.settings.sidebarClosed; await this.plugin.saveSettings(); }
+      this.render();
+    });
     const ttl = h('div', 'igc-title', null, left);
     h('span', 'igc-title-big', t.big, ttl);
     h('span', 'igc-title-small', t.small, ttl);
@@ -574,10 +585,27 @@ class CalendarView extends ItemView {
     add.addEventListener('click', () => this.openEditor(null, this.mode === 'month' ? this.selected : this.cursor));
   }
 
+  /* rotella del mouse: nel mese cambia mese; in settimana/giorno scorre le ore, con Maiusc (o scorrimento laterale) cambia settimana/giorno */
+  wheelNav(el, verticale) {
+    el.addEventListener('wheel', (e) => {
+      if (e.target.closest && e.target.closest('.igc-daylist')) return;
+      const orizz = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
+      if (!verticale && !orizz) return;
+      const d = orizz && Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : (e.deltaY || e.deltaX);
+      if (Math.abs(d) < 4) return;
+      e.preventDefault();
+      const now = Date.now();
+      if (this._wheelAt && now - this._wheelAt < 380) return;
+      this._wheelAt = now;
+      this.go(d > 0 ? 1 : -1);
+    }, { passive: false });
+  }
+
   /* ----- mese ----- */
   renderMonth(body) {
     const [start] = this.range();
     const wrap = h('div', 'igc-month', null, body);
+    this.wheelNav(wrap, true);
     const head = h('div', 'igc-dow', null, wrap);
     for (let i = 0; i < 7; i++) {
       const d = addDays(start, i);
@@ -604,7 +632,10 @@ class CalendarView extends ItemView {
         else { const dt = h('span', 'igc-pdot', null, p); dt.style.background = cal.color; h('span', 'igc-ptxt', ev.title, p); h('span', 'igc-ptime', hm(ev.start), p); }
         p.addEventListener('click', (e) => { e.stopPropagation(); this.openEditor(ev); });
       });
-      if (evs.length > 3) h('div', 'igc-more', `+${evs.length - 3} altri`, pills);
+      if (evs.length > 3) {
+        const more = h('div', 'igc-more', `+${evs.length - 3} altri`, pills);
+        more.addEventListener('click', (e) => { e.stopPropagation(); this.selected = day; new DayModal(this.app, this, day).open(); });
+      }
       const dots = h('div', 'igc-dots', null, cell);
       const seen = new Set();
       evs.forEach((ev) => { if (seen.size < 4 && !seen.has(ev.calId)) { seen.add(ev.calId); const dd = h('span', 'igc-dot', null, dots); dd.style.background = (this.plugin.calendarById(ev.calId) || { color: '#007AFF' }).color; } });
@@ -635,6 +666,7 @@ class CalendarView extends ItemView {
     }
     h('div', 'igc-row-cal', cal.name, info);
     row.addEventListener('click', () => this.openEditor(ev));
+    return row;
   }
 
   /* ----- agenda ----- */
@@ -659,6 +691,7 @@ class CalendarView extends ItemView {
     const [start] = this.range();
     const days = []; for (let i = 0; i < ndays; i++) days.push(addDays(start, i));
     const wrap = h('div', 'igc-tg', null, body);
+    this.wheelNav(wrap, false);
     const head = h('div', 'igc-tg-head', null, wrap);
     head.style.gridTemplateColumns = `48px repeat(${ndays}, 1fr)`;
     h('div', 'igc-tg-corner', null, head);
@@ -743,8 +776,30 @@ class CalendarView extends ItemView {
   }
 }
 
+/* ---------- anteprima del giorno ---------- */
+class DayModal extends Modal {
+  constructor(app, view, day) { super(app); this.view = view; this.day = day; }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass('igc-modal'); contentEl.addClass('igc-daymodal');
+    h('h3', 'igc-m-title', `${GIORNI[this.day.getDay()]} ${this.day.getDate()} ${MESI[this.day.getMonth()]}`, contentEl);
+    const list = h('div', 'igc-daymodal-list', null, contentEl);
+    const evs = this.view.plugin.eventsOnDay(this.day);
+    if (!evs.length) h('div', 'igc-empty', 'Nessun evento', list);
+    evs.forEach((ev) => {
+      const row = this.view.eventRow(list, ev, false);
+      row.addEventListener('click', () => { this.close(); });
+    });
+    const btns = h('div', 'igc-m-btns', null, contentEl);
+    h('span', 'igc-spacer', null, btns);
+    const nuovo = h('button', 'igc-btn igc-primary', 'Nuovo evento', btns);
+    nuovo.addEventListener('click', () => { this.close(); this.view.openEditor(null, this.day); });
+  }
+  onClose() { this.contentEl.empty ? this.contentEl.empty() : (this.contentEl.innerHTML = ''); }
+}
+
 /* ---------- finestra evento ---------- */
-const CATEGORIE_NUOVE = ['Personale', CAT_GARA, 'Università (appello)', 'Solo calendario'];
+const CATEGORIE_NUOVE = [['Personale', 'Personale', '#007AFF'], [CAT_GARA, 'Gara', '#FF9500'], ['Università (appello)', 'Appello', '#34C759'], ['Solo calendario', 'Solo calendario', '#8E8E93']];
 
 class EventModal extends Modal {
   constructor(app, plugin, ev, day, withTime, onDone) {
@@ -796,15 +851,21 @@ class EventModal extends Modal {
     const f = this.f, mode = this.mode;
     h('h3', 'igc-m-title', this.ev ? 'Modifica evento' : 'Nuovo evento', contentEl);
 
-    if (mode === 'note' && this.ev) h('div', 'igc-banner igc-info', 'Evento con nota nel vault: le modifiche vanno nella nota e arrivano su Google Calendar con la sincronizzazione.', contentEl);
-    if (mode === 'appello') h('div', 'igc-banner igc-info', 'Appello di un corso: le modifiche vanno nella nota del corso e arrivano su Google Calendar con la sincronizzazione.', contentEl);
 
     if (this.kind === 'new') {
-      const card0 = h('div', 'igc-card', null, contentEl);
-      const r0 = h('div', 'igc-field', null, card0); h('label', '', 'Categoria', r0);
-      const sel0 = h('select', 'igc-input', null, r0);
-      CATEGORIE_NUOVE.forEach((c) => { const o = h('option', '', c, sel0); o.value = c; if (c === f.cat) o.selected = true; });
-      sel0.addEventListener('change', () => { f.cat = sel0.value; this.draw(); });
+      const chips = h('div', 'igc-chips', null, contentEl);
+      CATEGORIE_NUOVE.forEach(([c, label, color]) => {
+        const b = h('button', 'igc-chip' + (c === f.cat ? ' on' : ''), null, chips);
+        b.style.setProperty('--c', color);
+        h('span', 'igc-chip-dot', null, b);
+        h('span', '', label, b);
+        b.addEventListener('click', () => { f.cat = c; this.draw(); });
+      });
+    } else if (mode === 'note' || mode === 'appello') {
+      const chips = h('div', 'igc-chips fixed', null, contentEl);
+      const info = mode === 'appello' ? CATEGORIE_NUOVE[2] : (CATEGORIE_NUOVE.find((x) => x[0] === f.cat) || CATEGORIE_NUOVE[0]);
+      const b = h('span', 'igc-chip on', null, chips); b.style.setProperty('--c', info[2]);
+      h('span', 'igc-chip-dot', null, b); h('span', '', info[1], b);
     }
 
     if (mode !== 'appello') {

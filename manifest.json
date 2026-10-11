@@ -1,7 +1,7 @@
 {
   "id": "ios-gcal",
   "name": "Calendario iOS",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "minAppVersion": "1.4.0",
   "description": "Vista calendario in stile iPhone che legge e modifica Google Calendar usando le chiavi di _config/google-sync.md.",
   "author": "Diego",
