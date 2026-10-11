@@ -1,0 +1,32 @@
+name: Release
+
+# Si avvia quando viene creato un tag (es. 0.3.1): pubblica la release con i file
+# che BRAT scarica (main.js, manifest.json, styles.css).
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Il tag deve coincidere con la versione nel manifest
+        run: |
+          v=$(jq -r .version manifest.json)
+          if [ "$v" != "$GITHUB_REF_NAME" ]; then
+            echo "Il tag $GITHUB_REF_NAME non coincide con la versione del manifest ($v)"
+            exit 1
+          fi
+
+      - name: Crea la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" main.js manifest.json styles.css \
+            --title "$GITHUB_REF_NAME" --generate-notes
