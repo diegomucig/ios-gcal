@@ -1,11 +1,13 @@
 name: Release
 
-# Si avvia quando viene creato un tag (es. 0.3.1): pubblica la release con i file
-# che BRAT scarica (main.js, manifest.json, styles.css).
+# Si avvia quando manifest.json cambia su main (cioè quando c'è una nuova versione):
+# crea la release con i file che BRAT scarica (main.js, manifest.json, styles.css).
+# Se la release di quella versione esiste già, non fa nulla.
 on:
   push:
-    tags:
-      - '*'
+    branches: [main]
+    paths: [manifest.json]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,17 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Il tag deve coincidere con la versione nel manifest
-        run: |
-          v=$(jq -r .version manifest.json)
-          if [ "$v" != "$GITHUB_REF_NAME" ]; then
-            echo "Il tag $GITHUB_REF_NAME non coincide con la versione del manifest ($v)"
-            exit 1
-          fi
-
-      - name: Crea la release
+      - name: Crea la release se non esiste
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" main.js manifest.json styles.css \
-            --title "$GITHUB_REF_NAME" --generate-notes
+          v=$(jq -r .version manifest.json)
+          if gh release view "$v" >/dev/null 2>&1; then
+            echo "La release $v esiste già"
+            exit 0
+          fi
+          gh release create "$v" main.js manifest.json styles.css \
+            --target "$GITHUB_SHA" --title "$v" --generate-notes
