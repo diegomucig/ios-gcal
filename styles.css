@@ -150,3 +150,5 @@
 .igc-chips.fixed .igc-chip { cursor: default; }
 .igc-daymodal-list { max-height: 55vh; overflow: auto; margin: 0 -8px; }
 .igc-daymodal .igc-row { padding-left: 8px; padding-right: 8px; }
+.igc-num, .igc-dots { cursor: pointer; }
+.igc-cell:not(.today) .igc-num:hover { background: var(--background-modifier-hover); }

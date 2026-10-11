@@ -622,6 +622,8 @@ class CalendarView extends ItemView {
       const day = addDays(start, i);
       const cell = h('div', 'igc-cell' + (day.getMonth() !== m ? ' other' : '') + (sameDay(day, today) ? ' today' : '') + (sameDay(day, this.selected) ? ' selected' : ''), null, grid);
       const num = h('div', 'igc-num', String(day.getDate()), cell);
+      const apriGiorno = (e) => { e.stopPropagation(); this.cursor = day; this.selected = day; this.mode = 'day'; this._keepScroll = false; this.reload(); };
+      num.addEventListener('click', apriGiorno);
       if (day.getDate() === 1) num.textContent = `${day.getDate()} ${MESI_BREVI[day.getMonth()]}`;
       const evs = this.plugin.eventsOnDay(day);
       const pills = h('div', 'igc-pills', null, cell);
@@ -637,6 +639,7 @@ class CalendarView extends ItemView {
         more.addEventListener('click', (e) => { e.stopPropagation(); this.selected = day; new DayModal(this.app, this, day).open(); });
       }
       const dots = h('div', 'igc-dots', null, cell);
+      dots.addEventListener('click', apriGiorno);
       const seen = new Set();
       evs.forEach((ev) => { if (seen.size < 4 && !seen.has(ev.calId)) { seen.add(ev.calId); const dd = h('span', 'igc-dot', null, dots); dd.style.background = (this.plugin.calendarById(ev.calId) || { color: '#007AFF' }).color; } });
       cell.addEventListener('click', () => { this.selected = day; if (day.getMonth() !== m) { this.cursor = new Date(day.getFullYear(), day.getMonth(), 1); this.reload(); } else this.render(); });
