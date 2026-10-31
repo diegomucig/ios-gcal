@@ -2,7 +2,7 @@
 /* Calendario iOS — vista calendario in stile iPhone per Google Calendar.
  * Usa le chiavi già presenti in _config/google-sync.md (nessun nuovo login).
  * Funziona su PC, tablet e iPhone (solo requestUrl, nessuna API Node). */
-const { Plugin, ItemView, Modal, Notice, PluginSettingTab, Setting, requestUrl, setIcon } = require('obsidian');
+const { Plugin, ItemView, Modal, Notice, PluginSettingTab, Setting, requestUrl, setIcon, Platform } = require('obsidian');
 
 const VIEW_TYPE = 'ios-gcal-view';
 const PALETTE = ['#007AFF', '#FF3B30', '#34C759', '#FF9500', '#AF52DE', '#FF2D55', '#5AC8FA', '#A2845E', '#FFCC00', '#30B0C7'];
@@ -88,6 +88,43 @@ function h(tag, cls, text, parent) {
   if (text !== undefined && text !== null && text !== '') el.textContent = text;
   if (parent) parent.appendChild(el);
   return el;
+}
+
+/* menu a tendina in stile iOS: su PC sostituisce il select nativo con un elenco arrotondato; su telefono e tablet resta il selettore nativo */
+function iosSelect(sel) {
+  if (Platform && (Platform.isMobile || Platform.isMobileApp)) return sel;
+  sel.style.display = 'none';
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'igc-select';
+  sel.parentNode.insertBefore(btn, sel.nextSibling);
+  const label = h('span', 'igc-select-label', '', btn);
+  h('span', 'igc-select-chev', '⌃⌄', btn);
+  let pop = null;
+  const chiudi = () => { if (pop) { pop.remove(); pop = null; document.removeEventListener('mousedown', fuori, true); } };
+  const fuori = (e) => { if (pop && !pop.contains(e.target) && !btn.contains(e.target)) chiudi(); };
+  const refresh = () => { const o = sel.options[sel.selectedIndex]; label.textContent = o ? o.textContent : ''; };
+  sel._refresh = refresh;
+  refresh();
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (pop) { chiudi(); return; }
+    pop = document.createElement('div'); pop.className = 'igc-pop';
+    [...sel.options].forEach((o, i) => {
+      const it = h('div', 'igc-pop-item' + (i === sel.selectedIndex ? ' on' : ''), o.textContent, pop);
+      it.addEventListener('click', () => { sel.selectedIndex = i; refresh(); chiudi(); sel.dispatchEvent(new Event('change')); });
+    });
+    document.body.appendChild(pop);
+    const r = btn.getBoundingClientRect();
+    pop.style.minWidth = Math.max(r.width, 140) + 'px';
+    const alto = pop.offsetHeight;
+    const sotto = window.innerHeight - r.bottom, sopra = r.top;
+    if (sotto < alto + 12 && sopra > sotto) { pop.style.maxHeight = Math.min(alto, sopra - 12) + 'px'; pop.style.top = (r.top - Math.min(alto, sopra - 12) - 6) + 'px'; }
+    else { pop.style.maxHeight = Math.max(120, sotto - 16) + 'px'; pop.style.top = (r.bottom + 6) + 'px'; }
+    pop.style.left = Math.max(8, Math.min(r.right - pop.offsetWidth, window.innerWidth - pop.offsetWidth - 8)) + 'px';
+    const on = pop.querySelector('.on'); if (on) on.scrollIntoView({ block: 'nearest' });
+    document.addEventListener('mousedown', fuori, true);
+  });
+  return sel;
 }
 
 function readableOn(hex) {
@@ -550,8 +587,12 @@ class CalendarView extends ItemView {
     const body = h('div', 'igc-body', null, main);
     // scorrimento orizzontale: a sinistra va avanti, a destra indietro (mese, settimana, giorno, agenda)
     let tx = 0, ty = 0, tt = 0;
+    body.style.touchAction = 'pan-y';
+    // i gesti laterali di Obsidian (menu laterali) non devono scattare mentre si scorre il calendario
+    ['touchstart', 'touchmove'].forEach((ev) => body.addEventListener(ev, (e) => e.stopPropagation(), { passive: true }));
     body.addEventListener('touchstart', (e) => { const t = e.touches[0]; tx = t.clientX; ty = t.clientY; tt = Date.now(); }, { passive: true });
     body.addEventListener('touchend', (e) => {
+      e.stopPropagation();
       const t = e.changedTouches[0], dx = t.clientX - tx, dy = t.clientY - ty;
       if (Date.now() - tt < 700 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) this.go(dx < 0 ? 1 : -1);
     }, { passive: true });
@@ -911,6 +952,7 @@ class EventModal extends Modal {
       const o = h('option', '', durataTesto(m), sel); o.value = String(m); if (m === minuti) o.selected = true;
     });
     sel.value = String(minuti);
+    if (sel._refresh) sel._refresh(); else iosSelect(sel);
     return sel;
   }
 
@@ -955,6 +997,7 @@ class EventModal extends Modal {
         const selC = h('select', 'igc-input', null, r1);
         this.corsi.forEach((c) => { const o = h('option', '', c.basename, selC); o.value = c.basename; if (c.basename === f.corso) o.selected = true; });
         selC.addEventListener('change', () => { f.corso = selC.value; });
+        iosSelect(selC);
         if (!this.corsi.length) h('span', 'igc-hint', 'Nessun corso con la proprietà "appelli"', r1);
       } else h('span', 'igc-static', f.corso, r1);
     }
@@ -965,6 +1008,7 @@ class EventModal extends Modal {
       const sel = h('select', 'igc-input', null, rowCal);
       this.plugin.calendars.filter((c) => c.writable || (this.ev && c.id === this.ev.calId)).forEach((c) => { const o = h('option', '', c.name, sel); o.value = c.id; if (c.id === f.calId) o.selected = true; });
       sel.addEventListener('change', () => { f.calId = sel.value; });
+      iosSelect(sel);
       const rowAll = h('div', 'igc-field', null, card); h('label', '', 'Tutto il giorno', rowAll);
       const all = h('input', '', null, rowAll); all.type = 'checkbox'; all.checked = f.allDay;
       const mk = (label, dKey, tKey) => {

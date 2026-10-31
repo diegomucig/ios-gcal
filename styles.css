@@ -162,3 +162,14 @@
 .igc-places-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); margin-bottom: 4px; }
 .igc-place { display: block; width: 100%; text-align: left; background: transparent; border: none; box-shadow: none; height: auto; padding: 7px 4px; font-size: 13px; color: var(--igc-blue); border-top: 1px solid var(--igc-sep); font-family: var(--igc-font); white-space: normal; cursor: pointer; }
 .igc-field .igc-input[type=text]:focus { box-shadow: none; }
+
+/* v0.4.1 menu a tendina in stile iOS */
+.igc-modal select.igc-input { appearance: none; -webkit-appearance: none; background-color: var(--background-modifier-hover) !important; color: var(--text-normal); border: none !important; border-radius: 10px; padding: 6px 12px; text-align: left !important; box-shadow: none; }
+.igc-modal select.igc-input option { background: var(--background-primary); color: var(--text-normal); }
+.igc-select { display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--background-modifier-hover); color: var(--text-normal); border: none; box-shadow: none; border-radius: 10px; padding: 6px 12px; height: auto; font-size: 14px; font-family: var(--igc-font); cursor: pointer; max-width: 100%; }
+.igc-select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.igc-select-chev { font-size: 9px; letter-spacing: -1px; color: var(--text-muted); writing-mode: horizontal-tb; }
+.igc-pop { position: fixed; z-index: 100000; overflow-y: auto; padding: 5px; border-radius: 14px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); box-shadow: 0 10px 34px rgba(0,0,0,.28); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif; }
+.igc-pop-item { padding: 8px 12px; border-radius: 9px; font-size: 14px; color: var(--text-normal); cursor: pointer; white-space: nowrap; }
+.igc-pop-item:hover { background: var(--background-modifier-hover); }
+.igc-pop-item.on { background: var(--igc-blue, #007AFF); color: #fff; font-weight: 600; }
