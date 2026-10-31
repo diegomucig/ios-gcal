@@ -173,3 +173,12 @@
 .igc-pop-item { padding: 8px 12px; border-radius: 9px; font-size: 14px; color: var(--text-normal); cursor: pointer; white-space: nowrap; }
 .igc-pop-item:hover { background: var(--background-modifier-hover); }
 .igc-pop-item.on { background: var(--igc-blue, #007AFF); color: #fff; font-weight: 600; }
+
+/* v0.4.3 frecce e + */
+.igc-round { width: 30px; height: 30px; min-width: 30px; padding: 0 !important; border-radius: 50% !important; display: inline-flex; align-items: center; justify-content: center; background: var(--background-modifier-hover) !important; color: var(--igc-blue); font-size: 0; line-height: 1; }
+.igc-round:hover { background: var(--background-modifier-border) !important; }
+.igc-round svg { width: 18px; height: 18px; stroke-width: 2.4; }
+.igc-nav { gap: 6px; }
+.igc-add { background: var(--igc-blue) !important; color: #fff !important; }
+.igc-add:hover { filter: brightness(1.08); }
+.igc-add svg { stroke-width: 2.6; }

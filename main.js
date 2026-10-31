@@ -585,17 +585,6 @@ class CalendarView extends ItemView {
     this.renderHeader(main);
     if (this.error) h('div', 'igc-banner igc-error', this.error, main);
     const body = h('div', 'igc-body', null, main);
-    // scorrimento orizzontale: a sinistra va avanti, a destra indietro (mese, settimana, giorno, agenda)
-    let tx = 0, ty = 0, tt = 0;
-    body.style.touchAction = 'pan-y';
-    // i gesti laterali di Obsidian (menu laterali) non devono scattare mentre si scorre il calendario
-    ['touchstart', 'touchmove'].forEach((ev) => body.addEventListener(ev, (e) => e.stopPropagation(), { passive: true }));
-    body.addEventListener('touchstart', (e) => { const t = e.touches[0]; tx = t.clientX; ty = t.clientY; tt = Date.now(); }, { passive: true });
-    body.addEventListener('touchend', (e) => {
-      e.stopPropagation();
-      const t = e.changedTouches[0], dx = t.clientX - tx, dy = t.clientY - ty;
-      if (Date.now() - tt < 700 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) this.go(dx < 0 ? 1 : -1);
-    }, { passive: true });
     if (this.loading) h('div', 'igc-loading', 'Carico…', body);
     if (this.mode === 'month') this.renderMonth(body);
     else if (this.mode === 'agenda') this.renderAgenda(body);
@@ -646,9 +635,9 @@ class CalendarView extends ItemView {
       b.addEventListener('click', async () => { this.mode = m; this.plugin.settings.lastView = m; this._keepScroll = false; await this.plugin.saveSettings(); await this.reload(); });
     });
     const nav = h('div', 'igc-nav', null, right);
-    const prev = h('button', 'igc-icon-btn', '‹', nav); prev.setAttribute('aria-label', 'Precedente');
+    const prev = h('button', 'igc-icon-btn igc-round', null, nav); prev.setAttribute('aria-label', 'Precedente'); setIcon(prev, 'chevron-left');
     const today = h('button', 'igc-btn', 'Oggi', nav);
-    const next = h('button', 'igc-icon-btn', '›', nav); next.setAttribute('aria-label', 'Successivo');
+    const next = h('button', 'igc-icon-btn igc-round', null, nav); next.setAttribute('aria-label', 'Successivo'); setIcon(next, 'chevron-right');
     prev.addEventListener('click', () => this.go(-1));
     next.addEventListener('click', () => this.go(1));
     today.addEventListener('click', async () => { this.cursor = startOfDay(new Date()); this.selected = this.cursor; this._keepScroll = false; await this.reload(); });
@@ -656,7 +645,7 @@ class CalendarView extends ItemView {
     const sy = h('button', 'igc-btn igc-sync' + (pc || this.syncing ? ' has' : ''), this.syncing ? '↻ Sincronizzo…' : (pc ? `↻ Sync · ${pc}` : '↻ Sync'), right);
     sy.setAttribute('aria-label', 'Sincronizza con Google Calendar');
     sy.addEventListener('click', () => this.syncNow());
-    const add = h('button', 'igc-icon-btn igc-add', '+', right);
+    const add = h('button', 'igc-icon-btn igc-round igc-add', null, right); setIcon(add, 'plus');
     add.setAttribute('aria-label', 'Nuovo evento');
     add.addEventListener('click', () => this.openEditor(null, this.mode === 'month' ? this.selected : this.cursor));
   }
