@@ -58,11 +58,20 @@ function hashS(s) {
   for (let i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) | 0;
   return (x >>> 0).toString(36);
 }
-function quandoSync(giorno, hhmm, ore) {
+function durataNorm(v) {
+  const n = Math.round(Number(v));
+  return n > 0 && n <= 1440 ? n : 60;
+}
+function durataTesto(m) {
+  const o = Math.floor(m / 60), r = m % 60;
+  if (!o) return `${r} min`;
+  return r ? `${o} h ${r} min` : (o === 1 ? '1 ora' : `${o} ore`);
+}
+function quandoSync(giorno, hhmm, minuti) {
   if (!hhmm) return { start: { date: giorno }, end: { date: ymd(addDays(parseYmd(giorno), 1)) } };
   const f = (d) => `${ymd(d)}T${hm(d)}:00`;
   const inizio = parseLocal(giorno, hhmm);
-  const fine = new Date(inizio.getFullYear(), inizio.getMonth(), inizio.getDate(), inizio.getHours() + ore, inizio.getMinutes());
+  const fine = new Date(inizio.getFullYear(), inizio.getMonth(), inizio.getDate(), inizio.getHours(), inizio.getMinutes() + minuti);
   return { start: { dateTime: f(inizio), timeZone: 'Europe/Rome' }, end: { dateTime: f(fine), timeZone: 'Europe/Rome' } };
 }
 const mapsLink = (t) => (t ? `[${t}](https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t)})` : '');
@@ -320,16 +329,17 @@ module.exports = class IosGcalPlugin extends Plugin {
     const target = cat === CAT_GARA ? cfg.CALENDARIO_SCHERMA : cfg.CALENDARIO_PRINCIPALE;
     const luogo = luogoTesto(fm.Luogo) || (cat === 'Università' ? LUOGO_UNIVERSITA : '');
     const dettagli = fm.Dettagli ? String(fm.Dettagli) : '';
-    const evento = { summary: nome, location: luogo, description: dettagli, ...quandoSync(giorno, hhmm, 1) };
+    const durata = durataNorm(fm.Durata);
+    const evento = { summary: nome, location: luogo, description: dettagli, ...quandoSync(giorno, hhmm, durata) };
     const impronta = hashS(JSON.stringify(evento) + '|' + target);
     const id = fm.GoogleEventId ? String(fm.GoogleEventId) : '';
     const calPrima = fm.GoogleCalendar ? String(fm.GoogleCalendar) : '';
-    return { file, nome, giorno, hhmm, cat, target, luogo, luogoRaw: fm.Luogo ? String(fm.Luogo) : '', dettagli, id, calPrima, impronta, pending: !id || calPrima !== target || String(fm.GoogleHash || '') !== impronta };
+    return { file, nome, giorno, hhmm, durata, cat, target, luogo, luogoRaw: fm.Luogo ? String(fm.Luogo) : '', dettagli, id, calPrima, impronta, pending: !id || calPrima !== target || String(fm.GoogleHash || '') !== impronta };
   }
 
   noteEvent(n) {
     const start = parseLocal(n.giorno, n.hhmm || '00:00');
-    const end = n.hhmm ? new Date(start.getTime() + 3600000) : addDays(start, 1);
+    const end = n.hhmm ? new Date(start.getTime() + n.durata * 60000) : addDays(start, 1);
     return { key: 'nota|' + n.file.path, id: n.id, calId: n.target, allDay: !n.hhmm, start, end, title: n.nome, location: n.luogo, description: n.dettagli, note: n, pending: n.pending, vaultTipo: '', vaultCorso: '' };
   }
 
@@ -359,6 +369,19 @@ module.exports = class IosGcalPlugin extends Plugin {
     this._merged = out;
     this._dirty = false;
     return out;
+  }
+
+  /* luoghi già usati in eventi passati e futuri (note del vault ed eventi Google in cache), dai più frequenti */
+  pastPlaces() {
+    const conta = new Map();
+    const add = (t) => { t = String(t || '').trim(); if (t) conta.set(t, (conta.get(t) || 0) + 1); };
+    this.app.vault.getMarkdownFiles().forEach((f) => {
+      if (!(f.path.startsWith(FUTURI + '/') || f.path.startsWith(PASSATI + '/') || f.path.startsWith(CESTINO + '/') || (f.path.startsWith(FENCING + '/') && f.path !== REGISTRO))) return;
+      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
+      if (fm && fm.Nome) add(luogoTesto(fm.Luogo));
+    });
+    this.events.forEach((g) => { if (!g.note) add(g.location); });
+    return [...conta.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map((x) => x[0]);
   }
 
   pendingCount() { this.merged(); return this._merged.filter((e) => e.note && e.pending).length + (this.pendingDeletes || 0); }
@@ -513,8 +536,14 @@ class CalendarView extends ItemView {
     this.applySize();
 
     const shell = h('div', 'igc-shell', null, root);
-    const side = h('aside', 'igc-side' + (this.sidebarOpen ? ' open' : '') + (this.plugin.settings.sidebarClosed ? ' closed' : ''), null, shell);
-    this.renderSidebar(side);
+    const narrow = root.classList.contains('igc-narrow');
+    if (!narrow) this.sidebarOpen = false;
+    if (narrow && this.sidebarOpen) {
+      const bd = h('div', 'igc-backdrop', null, shell);
+      bd.addEventListener('click', () => { this.sidebarOpen = false; this.render(); });
+    }
+    const side = h('aside', 'igc-side' + (narrow && this.sidebarOpen ? ' open' : '') + (!narrow && this.plugin.settings.sidebarClosed ? ' closed' : ''), null, shell);
+    this.renderSidebar(side, narrow);
     const main = h('div', 'igc-main', null, shell);
     this.renderHeader(main);
     if (this.error) h('div', 'igc-banner igc-error', this.error, main);
@@ -532,8 +561,13 @@ class CalendarView extends ItemView {
     this._keepScroll = true;
   }
 
-  renderSidebar(side) {
+  renderSidebar(side, narrow) {
     const hd = h('div', 'igc-side-title', 'Calendari', side);
+    if (narrow) {
+      const x = h('button', 'igc-icon-btn igc-side-close', '✕', hd);
+      x.setAttribute('aria-label', 'Chiudi');
+      x.addEventListener('click', () => { this.sidebarOpen = false; this.render(); });
+    }
     const list = h('div', 'igc-cal-list', null, side);
     this.plugin.calendars.forEach((cal) => {
       const row = h('label', 'igc-cal-row', null, list);
@@ -543,8 +577,10 @@ class CalendarView extends ItemView {
       h('span', 'igc-cal-name', cal.name, row);
       cb.addEventListener('change', async () => { await this.plugin.toggleCalendar(cal.id); this.render(); });
     });
-    const btn = h('button', 'igc-btn igc-btn-wide', '↻ Aggiorna', side);
-    btn.addEventListener('click', () => this.refresh(true));
+    if (narrow) {
+      const ok = h('button', 'igc-btn igc-btn-wide', 'Fatto', side);
+      ok.addEventListener('click', () => { this.sidebarOpen = false; this.render(); });
+    }
   }
 
   renderHeader(main) {
@@ -577,12 +613,36 @@ class CalendarView extends ItemView {
     next.addEventListener('click', () => this.go(1));
     today.addEventListener('click', async () => { this.cursor = startOfDay(new Date()); this.selected = this.cursor; this._keepScroll = false; await this.reload(); });
     const pc = this.plugin.pendingCount();
-    const sy = h('button', 'igc-btn igc-sync' + (pc ? ' has' : ''), pc ? `↻ Sincronizza · ${pc}` : '↻ Sync', right);
-    sy.setAttribute('aria-label', 'Sincronizza Calendar');
-    sy.addEventListener('click', () => { window.open(SYNC_URI); new Notice('Sincronizzazione avviata: quando finisce premi Aggiorna.'); });
+    const sy = h('button', 'igc-btn igc-sync' + (pc || this.syncing ? ' has' : ''), this.syncing ? '↻ Sincronizzo…' : (pc ? `↻ Sync · ${pc}` : '↻ Sync'), right);
+    sy.setAttribute('aria-label', 'Sincronizza con Google Calendar');
+    sy.addEventListener('click', () => this.syncNow());
     const add = h('button', 'igc-icon-btn igc-add', '+', right);
     add.setAttribute('aria-label', 'Nuovo evento');
     add.addEventListener('click', () => this.openEditor(null, this.mode === 'month' ? this.selected : this.cursor));
+  }
+
+  /* un solo tasto: lancia la sincronizzazione, aspetta che le note risultino sincronizzate e ricarica gli eventi */
+  syncNow() {
+    if (this.syncing) return;
+    this.syncing = true;
+    const t0 = Date.now();
+    const era = this.plugin.pendingCount();
+    new Notice('Sincronizzazione con Google Calendar…');
+    window.open(SYNC_URI);
+    this.render();
+    const fine = async (msg) => {
+      window.clearInterval(this._syncTimer);
+      this.syncing = false;
+      await this.refresh(true);
+      const resto = this.plugin.pendingCount();
+      new Notice(msg || (resto ? `Sincronizzazione finita, ma ${resto} modifiche risultano ancora da inviare.` : 'Sincronizzato con Google Calendar'));
+    };
+    this._syncTimer = window.setInterval(() => {
+      const dt = Date.now() - t0;
+      if (dt > 5000 && this.plugin.pendingCount() === 0) fine();
+      else if (dt > 90000) fine();
+    }, 2500);
+    this.registerInterval(this._syncTimer);
   }
 
   /* rotella del mouse: nel mese cambia mese; in settimana/giorno scorre le ore, con Maiusc (o scorrimento laterale) cambia settimana/giorno */
@@ -816,11 +876,13 @@ class EventModal extends Modal {
     else { s = new Date(base.getFullYear(), base.getMonth(), base.getDate(), Math.max(now.getHours() + 1, 8) % 24, 0); e = new Date(s.getTime() + 3600000); }
     this.kind = ev ? (ev.note ? 'note' : ev.vaultTipo === 'appello' ? 'appello' : 'google') : 'new';
     this.corsi = this.listCorsi();
+    this.luoghi = plugin.pastPlaces();
     this.f = {
       title: ev ? ev.title : '',
       cat: ev ? (ev.note ? ev.note.cat || 'Personale' : '') : 'Personale',
       allDay: ev ? ev.allDay : false,
       startDate: ymd(s), startTime: hm(s), endDate: ymd(e), endTime: hm(e),
+      duration: ev ? (ev.note ? ev.note.durata : (ev.allDay ? 60 : Math.max(5, Math.round((ev.end - ev.start) / 60000)))) : 60,
       location: ev ? (ev.note ? ev.note.luogo : ev.location) : '',
       description: ev ? ev.description : '',
       calId: ev ? ev.calId : ((plugin.calendars.find((c) => c.primary && c.writable) || plugin.calendars.find((c) => c.writable) || plugin.calendars[0] || {}).id),
@@ -839,6 +901,18 @@ class EventModal extends Modal {
       const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
       return fm && 'appelli' in fm;
     }).sort((a, b) => a.basename.localeCompare(b.basename));
+  }
+
+  durataSelect(parent, minuti, esistente) {
+    const sel = esistente || h('select', 'igc-input', null, parent);
+    sel.empty ? sel.empty() : (sel.innerHTML = '');
+    const base = [15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 480, 600];
+    const vals = base.includes(minuti) ? base : [...base, minuti].sort((a, b) => a - b);
+    vals.forEach((m) => {
+      const o = h('option', '', durataTesto(m), sel); o.value = String(m); if (m === minuti) o.selected = true;
+    });
+    sel.value = String(minuti);
+    return sel;
   }
 
   get mode() { // cosa si sta compilando
@@ -897,12 +971,29 @@ class EventModal extends Modal {
       const mk = (label, dKey, tKey) => {
         const r = h('div', 'igc-field', null, card); h('label', '', label, r);
         const wrap = h('div', 'igc-dt', null, r);
-        const d = h('input', 'igc-input', null, wrap); d.type = 'date'; d.value = f[dKey]; d.addEventListener('change', () => { f[dKey] = d.value; });
-        const t = h('input', 'igc-input igc-time', null, wrap); t.type = 'time'; t.value = f[tKey]; t.addEventListener('change', () => { f[tKey] = t.value; });
-        return t;
+        const d = h('input', 'igc-input', null, wrap); d.type = 'date'; d.value = f[dKey];
+        const t = h('input', 'igc-input igc-time', null, wrap); t.type = 'time'; t.value = f[tKey];
+        return { r, d, t };
       };
-      const t1 = mk('Inizio', 'startDate', 'startTime'), t2 = mk('Fine', 'endDate', 'endTime');
-      const syncAll = () => { t1.style.display = t2.style.display = f.allDay ? 'none' : ''; };
+      const a = mk('Inizio', 'startDate', 'startTime'), b = mk('Fine', 'endDate', 'endTime');
+      const rowDur = h('div', 'igc-field', null, card); h('label', '', 'Durata', rowDur);
+      const selD = this.durataSelect(rowDur, f.duration);
+      const ricalcolaFine = () => {
+        const i = parseLocal(f.startDate, f.startTime || '00:00');
+        const e = new Date(i.getTime() + f.duration * 60000);
+        f.endDate = ymd(e); f.endTime = hm(e); b.d.value = f.endDate; b.t.value = f.endTime;
+      };
+      const daFine = () => {
+        const i = parseLocal(f.startDate, f.startTime || '00:00'), e = parseLocal(f.endDate, f.endTime || '00:00');
+        const m = Math.round((e - i) / 60000);
+        if (m > 0) { f.duration = m; this.durataSelect(rowDur, m, selD); }
+      };
+      a.d.addEventListener('change', () => { f.startDate = a.d.value; ricalcolaFine(); });
+      a.t.addEventListener('change', () => { f.startTime = a.t.value; ricalcolaFine(); });
+      b.d.addEventListener('change', () => { f.endDate = b.d.value; daFine(); });
+      b.t.addEventListener('change', () => { f.endTime = b.t.value; daFine(); });
+      selD.addEventListener('change', () => { f.duration = Number(selD.value); ricalcolaFine(); });
+      const syncAll = () => { a.t.style.display = b.t.style.display = f.allDay ? 'none' : ''; rowDur.style.display = f.allDay ? 'none' : ''; };
       all.addEventListener('change', () => { f.allDay = all.checked; syncAll(); });
       syncAll();
     } else {
@@ -912,7 +1003,10 @@ class EventModal extends Modal {
       const all = h('input', '', null, rowAll); all.type = 'checkbox'; all.checked = f.allDay;
       const rt = h('div', 'igc-field', null, card); h('label', '', 'Ora', rt);
       const t = h('input', 'igc-input igc-time', null, rt); t.type = 'time'; t.value = f.startTime; t.addEventListener('change', () => { f.startTime = t.value; });
-      const syncAll = () => { rt.style.display = f.allDay ? 'none' : ''; };
+      const rowDur = h('div', 'igc-field', null, card); h('label', '', 'Durata', rowDur);
+      const selD = this.durataSelect(rowDur, f.duration);
+      selD.addEventListener('change', () => { f.duration = Number(selD.value); });
+      const syncAll = () => { rt.style.display = f.allDay ? 'none' : ''; rowDur.style.display = f.allDay || mode === 'appello' ? 'none' : ''; };
       all.addEventListener('change', () => { f.allDay = all.checked; syncAll(); });
       syncAll();
     }
@@ -920,10 +1014,24 @@ class EventModal extends Modal {
     const card2 = h('div', 'igc-card', null, contentEl);
     const rl = h('div', 'igc-field', null, card2); h('label', '', 'Luogo', rl);
     const loc = h('input', 'igc-input', null, rl); loc.type = 'text'; loc.placeholder = mode === 'appello' ? 'Vuoto = Università di Udine' : 'Indirizzo'; loc.value = f.location; loc.addEventListener('input', () => { f.location = loc.value; });
-    if (f.location) {
-      const a = h('a', 'igc-maps', 'Apri in Maps ↗', card2);
-      a.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(f.location);
-    }
+    const sug = h('div', 'igc-places', null, card2);
+    const maps = h('a', 'igc-maps', 'Apri in Maps ↗', card2);
+    const aggiornaLuogo = () => {
+      const q = f.location.trim().toLowerCase();
+      maps.style.display = f.location.trim() ? '' : 'none';
+      maps.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(f.location);
+      sug.empty ? sug.empty() : (sug.innerHTML = '');
+      const lista = this.luoghi.filter((l) => l.toLowerCase() !== q && (!q || l.toLowerCase().includes(q))).slice(0, 6);
+      if (!lista.length) { sug.style.display = 'none'; return; }
+      sug.style.display = '';
+      h('div', 'igc-places-title', q ? 'Luoghi già usati' : 'Luoghi usati in passato', sug);
+      lista.forEach((l) => {
+        const b = h('button', 'igc-place', l, sug);
+        b.addEventListener('click', () => { f.location = l; loc.value = l; aggiornaLuogo(); });
+      });
+    };
+    loc.addEventListener('input', aggiornaLuogo);
+    aggiornaLuogo();
     const rd2 = h('div', 'igc-field igc-field-col', null, card2); h('label', '', mode === 'appello' ? 'Dettagli (es. Primo parziale)' : 'Dettagli', rd2);
     const desc = h('textarea', 'igc-input', null, rd2); desc.rows = mode === 'appello' ? 2 : 4; desc.value = f.description; desc.addEventListener('input', () => { f.description = desc.value; });
 
@@ -973,9 +1081,9 @@ class EventModal extends Modal {
     }
   }
 
-  noteText(nome, data, orario, luogo, cat, dettagli, gara) {
+  noteText(nome, data, orario, luogo, cat, dettagli, gara, durata) {
     const q = (v) => '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
-    const r = ['---', `Nome: ${nome}`, `Data: ${data}`, `Orario: ${orario}`, `Luogo: ${q(mapsLink(luogo))}`, `Categoria: ${cat}`];
+    const r = ['---', `Nome: ${nome}`, `Data: ${data}`, `Orario: ${orario}`, ...(orario && durata && durata !== 60 ? [`Durata: ${durata}`] : []), `Luogo: ${q(mapsLink(luogo))}`, `Categoria: ${cat}`];
     if (dettagli || !gara) r.push(`Dettagli: ${dettagli}`);
     if (gara) r.push('Risultati:');
     r.push('---', '');
@@ -994,7 +1102,7 @@ class EventModal extends Modal {
     await this.ensureFolder(folder);
     let path = `${folder}/${base}.md`;
     if (app.vault.getAbstractFileByPath(path)) path = `${folder}/${base} - ${stamp}.md`;
-    await app.vault.create(path, this.noteText(nome, f.startDate, orario, f.location.trim(), f.cat, f.description.trim(), gara));
+    await app.vault.create(path, this.noteText(nome, f.startDate, orario, f.location.trim(), f.cat, f.description.trim(), gara, f.duration));
   }
 
   async editNote() {
@@ -1003,6 +1111,7 @@ class EventModal extends Modal {
     const orario = f.allDay ? '' : f.startTime;
     await app.fileManager.processFrontMatter(file, (fm) => {
       fm.Nome = nome; fm.Data = f.startDate; fm.Orario = orario;
+      if (orario && f.duration !== 60) fm.Durata = f.duration; else if ('Durata' in fm) delete fm.Durata;
       fm.Luogo = mapsLink(f.location.trim());
       if (f.description.trim() || 'Dettagli' in fm) fm.Dettagli = f.description.trim();
     });
