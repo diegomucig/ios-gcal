@@ -548,6 +548,13 @@ class CalendarView extends ItemView {
     this.renderHeader(main);
     if (this.error) h('div', 'igc-banner igc-error', this.error, main);
     const body = h('div', 'igc-body', null, main);
+    // scorrimento orizzontale: a sinistra va avanti, a destra indietro (mese, settimana, giorno, agenda)
+    let tx = 0, ty = 0, tt = 0;
+    body.addEventListener('touchstart', (e) => { const t = e.touches[0]; tx = t.clientX; ty = t.clientY; tt = Date.now(); }, { passive: true });
+    body.addEventListener('touchend', (e) => {
+      const t = e.changedTouches[0], dx = t.clientX - tx, dy = t.clientY - ty;
+      if (Date.now() - tt < 700 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) this.go(dx < 0 ? 1 : -1);
+    }, { passive: true });
     if (this.loading) h('div', 'igc-loading', 'Carico…', body);
     if (this.mode === 'month') this.renderMonth(body);
     else if (this.mode === 'agenda') this.renderAgenda(body);
@@ -563,11 +570,7 @@ class CalendarView extends ItemView {
 
   renderSidebar(side, narrow) {
     const hd = h('div', 'igc-side-title', 'Calendari', side);
-    if (narrow) {
-      const x = h('button', 'igc-icon-btn igc-side-close', '✕', hd);
-      x.setAttribute('aria-label', 'Chiudi');
-      x.addEventListener('click', () => { this.sidebarOpen = false; this.render(); });
-    }
+
     const list = h('div', 'igc-cal-list', null, side);
     this.plugin.calendars.forEach((cal) => {
       const row = h('label', 'igc-cal-row', null, list);
@@ -577,10 +580,6 @@ class CalendarView extends ItemView {
       h('span', 'igc-cal-name', cal.name, row);
       cb.addEventListener('change', async () => { await this.plugin.toggleCalendar(cal.id); this.render(); });
     });
-    if (narrow) {
-      const ok = h('button', 'igc-btn igc-btn-wide', 'Fatto', side);
-      ok.addEventListener('click', () => { this.sidebarOpen = false; this.render(); });
-    }
   }
 
   renderHeader(main) {
@@ -1021,10 +1020,10 @@ class EventModal extends Modal {
       maps.style.display = f.location.trim() ? '' : 'none';
       maps.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(f.location);
       sug.empty ? sug.empty() : (sug.innerHTML = '');
-      const lista = this.luoghi.filter((l) => l.toLowerCase() !== q && (!q || l.toLowerCase().includes(q))).slice(0, 6);
+      const lista = q ? this.luoghi.filter((l) => l.toLowerCase() !== q && l.toLowerCase().includes(q)).slice(0, 6) : [];
       if (!lista.length) { sug.style.display = 'none'; return; }
       sug.style.display = '';
-      h('div', 'igc-places-title', q ? 'Luoghi già usati' : 'Luoghi usati in passato', sug);
+      h('div', 'igc-places-title', 'Luoghi già usati', sug);
       lista.forEach((l) => {
         const b = h('button', 'igc-place', l, sug);
         b.addEventListener('click', () => { f.location = l; loc.value = l; aggiornaLuogo(); });
