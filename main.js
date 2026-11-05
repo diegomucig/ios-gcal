@@ -253,6 +253,8 @@ module.exports = class IosGcalPlugin extends Plugin {
   renderEsami(src, el, ctx) {
     const child = new MarkdownRenderChild(el);
     ctx.addChild(child);
+    // toccare l'elenco non deve spostare il cursore dentro il blocco (in Anteprima live lo farebbe tornare testo grezzo)
+    ['pointerdown', 'mousedown', 'touchstart', 'touchend', 'mouseup', 'click'].forEach((t) => el.addEventListener(t, (e) => e.stopPropagation()));
     const opts = {};
     String(src || '').split('\n').forEach((l) => { const m = l.match(/^\s*([A-Za-z]+)\s*:\s*(.*)$/); if (m) opts[m[1].toLowerCase()] = m[2].trim(); });
     let corso = opts.corso || '';
