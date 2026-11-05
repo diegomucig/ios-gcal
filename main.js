@@ -2,7 +2,7 @@
 /* Calendario iOS — vista calendario in stile iPhone per Google Calendar.
  * Usa le chiavi già presenti in _config/google-sync.md (nessun nuovo login).
  * Funziona su PC, tablet e iPhone (solo requestUrl, nessuna API Node). */
-const { Plugin, ItemView, Modal, Notice, PluginSettingTab, Setting, requestUrl, setIcon, Platform } = require('obsidian');
+const { Plugin, ItemView, Modal, Notice, PluginSettingTab, Setting, requestUrl, setIcon, Platform, MarkdownRenderChild } = require('obsidian');
 
 const VIEW_TYPE = 'ios-gcal-view';
 const PALETTE = ['#007AFF', '#FF3B30', '#34C759', '#FF9500', '#AF52DE', '#FF2D55', '#5AC8FA', '#A2845E', '#FFCC00', '#30B0C7'];
@@ -148,6 +148,7 @@ module.exports = class IosGcalPlugin extends Plugin {
     this.addCommand({ id: 'open-calendar', name: 'Apri calendario', callback: () => this.activateView() });
     this.addCommand({ id: 'new-event', name: 'Nuovo evento', callback: async () => { await this.activateView(); } });
     this.addSettingTab(new IosGcalSettings(this.app, this));
+    this.registerMarkdownCodeBlockProcessor('ios-esami', (src, el, ctx) => this.renderEsami(src, el, ctx));
     this.cfg = {};
     this._dirty = true;
     this._merged = [];
@@ -222,6 +223,83 @@ module.exports = class IosGcalPlugin extends Plugin {
         return txt.replace(RX, (_, a, b, c) => `${a}> ${esistenti.map((n) => `[[${n}]]`).join(' · ')}\n${c}`);
       });
     } catch (e) { /* riprova alla prossima modifica */ }
+  }
+
+  /* ----- esami nelle note dei corsi e in University (blocco ```ios-esami```) ----- */
+  esamiDi(corso) {
+    const out = [];
+    this.app.vault.getMarkdownFiles().forEach((f) => {
+      if (!f.path.startsWith(UNIV + '/')) return;
+      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
+      if (!fm || !('appelli' in fm)) return;
+      if (corso && f.basename !== corso) return;
+      const lista = Array.isArray(fm.appelli) ? fm.appelli : (fm.appelli ? [fm.appelli] : []);
+      lista.forEach((v) => {
+        const p = String(v).split('|').map((x) => x.trim());
+        const giorno = (p[0] || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(giorno)) return;
+        out.push({ corso: f.basename, giorno, orario: orarioNorm(p[1]), luogo: luogoTesto(p[2] || ''), dettagli: p.slice(3).join(' | ') });
+      });
+    });
+    return out.sort((a, b) => (a.giorno + a.orario).localeCompare(b.giorno + b.orario));
+  }
+
+  esameEvento(x) {
+    const start = x.orario ? parseLocal(x.giorno, x.orario) : parseYmd(x.giorno);
+    return { start, end: x.orario ? new Date(start.getTime() + 7200000) : addDays(start, 1), allDay: !x.orario, title: x.dettagli ? `${x.corso} - ${x.dettagli}` : x.corso, dettagli: x.dettagli,
+      location: x.luogo || LUOGO_UNIVERSITA, description: '', vaultTipo: 'appello', vaultCorso: x.corso, calId: '', note: null };
+  }
+
+  renderEsami(src, el, ctx) {
+    const child = new MarkdownRenderChild(el);
+    ctx.addChild(child);
+    const opts = {};
+    String(src || '').split('\n').forEach((l) => { const m = l.match(/^\s*([A-Za-z]+)\s*:\s*(.*)$/); if (m) opts[m[1].toLowerCase()] = m[2].trim(); });
+    let corso = opts.corso || '';
+    if (!corso) {
+      const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+      const fm = file && this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (file && fm && 'appelli' in fm && file.path.startsWith(UNIV + '/')) corso = file.basename;
+    }
+    const apri = (ev) => new EventModal(this.app, this, ev, null, false, () => {
+      new Notice('Sincronizzo con Google Calendar…');
+      setTimeout(() => window.open(SYNC_URI), 1500);
+    }, ev ? null : { corso }).open();
+    const draw = () => {
+      el.empty ? el.empty() : (el.innerHTML = '');
+      const box = h('div', 'igc-esami', null, el);
+      const head = h('div', 'igc-esami-head', null, box);
+      h('span', 'igc-esami-title', corso ? 'Esami' : 'Tutti gli esami', head);
+      const add = h('button', 'igc-icon-btn igc-round igc-add', null, head); setIcon(add, 'plus'); add.setAttribute('aria-label', 'Nuovo esame');
+      add.addEventListener('click', () => apri(null));
+      const oggi = ymd(new Date());
+      const tutti = this.esamiDi(corso);
+      const prossimi = tutti.filter((x) => x.giorno >= oggi), passati = tutti.filter((x) => x.giorno < oggi).reverse();
+      const riga = (parent, x, passato) => {
+        const r = h('div', 'igc-esame' + (passato ? ' past' : ''), null, parent);
+        const d = parseYmd(x.giorno);
+        const dt = h('div', 'igc-esame-date', null, r);
+        h('span', 'igc-esame-dow', GIORNI_BREVI[d.getDay()], dt); h('span', 'igc-esame-num', String(d.getDate()), dt); h('span', 'igc-esame-mon', MESI_BREVI[d.getMonth()] + (d.getFullYear() !== new Date().getFullYear() ? ' ' + d.getFullYear() : ''), dt);
+        h('div', 'igc-row-bar', null, r).style.background = '#34C759';
+        const info = h('div', 'igc-row-info', null, r);
+        h('div', 'igc-row-title', corso ? (x.dettagli || 'Esame') : x.corso, info);
+        const sub = [x.orario || 'Tutto il giorno'];
+        if (!corso && x.dettagli) sub.push(x.dettagli);
+        h('div', 'igc-row-cal', sub.join(' · '), info);
+        if (x.luogo) h('div', 'igc-esame-loc', x.luogo, info);
+        r.addEventListener('click', () => apri(this.esameEvento(x)));
+      };
+      if (!prossimi.length) h('div', 'igc-esami-empty', 'Nessun esame in programma', box);
+      prossimi.forEach((x) => riga(box, x, false));
+      if (passati.length) {
+        const det = h('details', 'igc-esami-past', null, box);
+        h('summary', '', `Passati (${passati.length})`, det);
+        passati.forEach((x) => riga(det, x, true));
+      }
+    };
+    let t = null;
+    child.registerEvent(this.app.metadataCache.on('changed', () => { clearTimeout(t); t = setTimeout(draw, 250); }));
+    draw();
   }
 
   onunload() { this.app.workspace.detachLeavesOfType(VIEW_TYPE); }
@@ -894,9 +972,9 @@ class DayModal extends Modal {
 const CATEGORIE_NUOVE = [['Personale', 'Personale', '#007AFF'], [CAT_GARA, 'Gara', '#FF9500'], ['Università (appello)', 'Appello', '#34C759'], ['Solo calendario', 'Solo calendario', '#8E8E93']];
 
 class EventModal extends Modal {
-  constructor(app, plugin, ev, day, withTime, onDone) {
+  constructor(app, plugin, ev, day, withTime, onDone, preset) {
     super(app);
-    this.plugin = plugin; this.ev = ev; this.onDone = onDone;
+    this.plugin = plugin; this.ev = ev; this.onDone = onDone; this.preset = preset || null;
     const now = new Date();
     const base = day || startOfDay(now);
     let s, e;
@@ -908,18 +986,18 @@ class EventModal extends Modal {
     this.luoghi = plugin.pastPlaces();
     this.f = {
       title: ev ? ev.title : '',
-      cat: ev ? (ev.note ? ev.note.cat || 'Personale' : '') : 'Personale',
+      cat: ev ? (ev.note ? ev.note.cat || 'Personale' : '') : (preset ? 'Università (appello)' : 'Personale'),
       allDay: ev ? ev.allDay : false,
       startDate: ymd(s), startTime: hm(s), endDate: ymd(e), endTime: hm(e),
       duration: ev ? (ev.note ? ev.note.durata : (ev.allDay ? 60 : Math.max(5, Math.round((ev.end - ev.start) / 60000)))) : 60,
       location: ev ? (ev.note ? ev.note.luogo : ev.location) : '',
       description: ev ? ev.description : '',
       calId: ev ? ev.calId : ((plugin.calendars.find((c) => c.primary && c.writable) || plugin.calendars.find((c) => c.writable) || plugin.calendars[0] || {}).id),
-      corso: ev && ev.vaultCorso ? ev.vaultCorso : (this.corsi[0] ? this.corsi[0].basename : ''),
+      corso: ev && ev.vaultCorso ? ev.vaultCorso : (preset && preset.corso ? preset.corso : (this.corsi[0] ? this.corsi[0].basename : '')),
     };
     if (this.kind === 'appello') { // il titolo è "Corso - Dettagli": si modifica il dettaglio
       const t = ev.title; const i = t.indexOf(' - ');
-      this.f.description = i >= 0 ? t.slice(i + 3) : '';
+      this.f.description = ev.dettagli !== undefined ? ev.dettagli : (i >= 0 ? t.slice(i + 3) : '');
       this.f.location = ev.location === LUOGO_UNIVERSITA ? '' : ev.location;
     }
   }
@@ -956,10 +1034,10 @@ class EventModal extends Modal {
     const { contentEl } = this;
     contentEl.empty ? contentEl.empty() : (contentEl.innerHTML = '');
     const f = this.f, mode = this.mode;
-    h('h3', 'igc-m-title', this.ev ? 'Modifica evento' : 'Nuovo evento', contentEl);
+    h('h3', 'igc-m-title', this.ev ? (mode === 'appello' ? 'Modifica esame' : 'Modifica evento') : (this.preset ? 'Nuovo esame' : 'Nuovo evento'), contentEl);
 
 
-    if (this.kind === 'new') {
+    if (this.kind === 'new' && !this.preset) {
       const chips = h('div', 'igc-chips', null, contentEl);
       CATEGORIE_NUOVE.forEach(([c, label, color]) => {
         const b = h('button', 'igc-chip' + (c === f.cat ? ' on' : ''), null, chips);
@@ -982,7 +1060,7 @@ class EventModal extends Modal {
     } else {
       const card1 = h('div', 'igc-card', null, contentEl);
       const r1 = h('div', 'igc-field', null, card1); h('label', '', 'Corso', r1);
-      if (this.kind === 'new') {
+      if (this.kind === 'new' && !(this.preset && this.preset.corso)) {
         const selC = h('select', 'igc-input', null, r1);
         this.corsi.forEach((c) => { const o = h('option', '', c.basename, selC); o.value = c.basename; if (c.basename === f.corso) o.selected = true; });
         selC.addEventListener('change', () => { f.corso = selC.value; });
