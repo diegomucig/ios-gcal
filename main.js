@@ -975,7 +975,7 @@ class DayModal extends Modal {
 }
 
 /* ---------- finestra evento ---------- */
-const CATEGORIE_NUOVE = [['Personale', 'Personale', '#007AFF'], [CAT_GARA, 'Gara', '#FF9500'], ['Università (appello)', 'Appello', '#34C759'], ['Solo calendario', 'Solo calendario', '#8E8E93']];
+const CATEGORIE_NUOVE = [['Personale', 'Evento con nota', '#007AFF'], [CAT_GARA, 'Gara', '#FF9500'], ['Università (appello)', 'Appello', '#34C759'], ['Solo calendario', 'Solo su Google', '#8E8E93']];
 
 class EventModal extends Modal {
   constructor(app, plugin, ev, day, withTime, onDone, preset) {
