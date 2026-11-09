@@ -1029,8 +1029,17 @@ class EventModal extends Modal {
     return sel;
   }
 
+  /* il tipo di evento dipende dal calendario scelto */
+  calKind(id) {
+    const cfg = this.plugin.cfg || {}, c = this.plugin.calendars.find((x) => x.id === id) || {}, nm = String(c.name || '');
+    if (id && (id === cfg.CALENDARIO_APPELLI || /^appelli/i.test(nm))) return 'Università (appello)';
+    if (id && (id === cfg.CALENDARIO_SCHERMA || /^scherma/i.test(nm))) return CAT_GARA;
+    if (id && (id === cfg.CALENDARIO_UNIVERSITY || /^university/i.test(nm))) return 'Università';
+    return 'Personale';
+  }
+
   get mode() { // cosa si sta compilando
-    if (this.kind === 'new') return { 'Personale': 'note', [CAT_GARA]: 'note', 'Università (appello)': 'appello', 'Solo calendario': 'google' }[this.f.cat];
+    if (this.kind === 'new') return { 'Personale': 'note', [CAT_GARA]: 'note', 'Università': 'note', 'Università (appello)': 'appello', 'Solo calendario': 'google' }[this.f.cat];
     return this.kind;
   }
 
@@ -1043,20 +1052,29 @@ class EventModal extends Modal {
     h('h3', 'igc-m-title', this.ev ? (mode === 'appello' ? 'Modifica esame' : 'Modifica evento') : (this.preset ? 'Nuovo esame' : 'Nuovo evento'), contentEl);
 
 
-    if (this.kind === 'new' && !this.preset) {
-      const chips = h('div', 'igc-chips', null, contentEl);
-      CATEGORIE_NUOVE.forEach(([c, label, color]) => {
-        const b = h('button', 'igc-chip' + (c === f.cat ? ' on' : ''), null, chips);
-        b.style.setProperty('--c', color);
+    // in alto i calendari: toccandone uno si sceglie dove finisce l'evento
+    {
+      const fixed = !!this.preset || (!!this.ev && (mode === 'appello' || (mode === 'note' && f.cat === CAT_GARA)));
+      const lista = this.plugin.calendars.filter((c) => c.writable || c.id === f.calId);
+      let shown = lista;
+      if (fixed) {
+        const k = mode === 'appello' || this.preset ? 'Università (appello)' : CAT_GARA;
+        const cc = lista.find((c) => this.calKind(c.id) === k);
+        shown = [cc || { id: '', name: k === CAT_GARA ? 'Scherma' : 'Appelli università', color: k === CAT_GARA ? '#FF9500' : '#34C759' }];
+      }
+      const chips = h('div', 'igc-chips' + (fixed ? ' fixed' : ''), null, contentEl);
+      shown.forEach((c) => {
+        const on = fixed || c.id === f.calId;
+        const b = h(fixed ? 'span' : 'button', 'igc-chip' + (on ? ' on' : ''), null, chips);
+        b.style.setProperty('--c', c.color || '#007AFF');
         h('span', 'igc-chip-dot', null, b);
-        h('span', '', label, b);
-        b.addEventListener('click', () => { f.cat = c; this.draw(); });
+        h('span', '', c.name, b);
+        if (!fixed) b.addEventListener('click', () => {
+          f.calId = c.id;
+          if (this.kind === 'new') { const k = this.calKind(c.id); f.cat = f.solo && k !== 'Università (appello)' ? 'Solo calendario' : k; }
+          this.draw();
+        });
       });
-    } else if (mode === 'note' || mode === 'appello') {
-      const chips = h('div', 'igc-chips fixed', null, contentEl);
-      const info = mode === 'appello' ? CATEGORIE_NUOVE[2] : (CATEGORIE_NUOVE.find((x) => x[0] === f.cat) || CATEGORIE_NUOVE[0]);
-      const b = h('span', 'igc-chip on', null, chips); b.style.setProperty('--c', info[2]);
-      h('span', 'igc-chip-dot', null, b); h('span', '', info[1], b);
     }
 
     if (mode !== 'appello') {
@@ -1076,19 +1094,12 @@ class EventModal extends Modal {
     }
 
     const card = h('div', 'igc-card', null, contentEl);
-    if (mode === 'note' && f.cat !== CAT_GARA) {
-      const rowCal = h('div', 'igc-field', null, card); h('label', '', 'Calendario', rowCal);
-      const sel = h('select', 'igc-input', null, rowCal);
-      this.plugin.calendars.filter((c) => c.writable || c.id === f.calId).forEach((c) => { const o = h('option', '', c.name, sel); o.value = c.id; if (c.id === f.calId) o.selected = true; });
-      sel.addEventListener('change', () => { f.calId = sel.value; });
-      iosSelect(sel);
+    if (this.kind === 'new' && !this.preset && mode !== 'appello') {
+      const rowNote = h('div', 'igc-field', null, card); h('label', '', 'Salva anche come nota nel vault', rowNote);
+      const nt = h('input', '', null, rowNote); nt.type = 'checkbox'; nt.checked = !f.solo;
+      nt.addEventListener('change', () => { f.solo = !nt.checked; f.cat = f.solo ? 'Solo calendario' : this.calKind(f.calId); this.draw(); });
     }
     if (mode === 'google') {
-      const rowCal = h('div', 'igc-field', null, card); h('label', '', 'Calendario', rowCal);
-      const sel = h('select', 'igc-input', null, rowCal);
-      this.plugin.calendars.filter((c) => c.writable || (this.ev && c.id === this.ev.calId)).forEach((c) => { const o = h('option', '', c.name, sel); o.value = c.id; if (c.id === f.calId) o.selected = true; });
-      sel.addEventListener('change', () => { f.calId = sel.value; });
-      iosSelect(sel);
       const rowAll = h('div', 'igc-field', null, card); h('label', '', 'Tutto il giorno', rowAll);
       const all = h('input', '', null, rowAll); all.type = 'checkbox'; all.checked = f.allDay;
       const mk = (label, dKey, tKey) => {
