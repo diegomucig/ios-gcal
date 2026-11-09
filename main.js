@@ -380,6 +380,7 @@ module.exports = class IosGcalPlugin extends Plugin {
       });
     }
     this.calendars = list;
+    this._calAt = Date.now();
     return list;
   }
 
@@ -443,7 +444,8 @@ module.exports = class IosGcalPlugin extends Plugin {
     const hhmm = orarioNorm(fm.Orario);
     const cat = String(fm.Categoria || '').trim();
     const cfg = this.cfg || {};
-    const target = cat === CAT_GARA ? cfg.CALENDARIO_SCHERMA : (cat === 'Università' ? cfg.CALENDARIO_UNIVERSITY : cfg.CALENDARIO_PRINCIPALE);
+    const over = fm.Calendario ? String(fm.Calendario).trim() : '';
+    const target = over || (cat === CAT_GARA ? cfg.CALENDARIO_SCHERMA : (cat === 'Università' ? cfg.CALENDARIO_UNIVERSITY : cfg.CALENDARIO_PRINCIPALE));
     const luogo = luogoTesto(fm.Luogo) || (cat === 'Università' ? LUOGO_UNIVERSITA : '');
     const dettagli = fm.Dettagli ? String(fm.Dettagli) : '';
     const durata = durataNorm(fm.Durata);
@@ -451,7 +453,7 @@ module.exports = class IosGcalPlugin extends Plugin {
     const impronta = hashS(JSON.stringify(evento) + '|' + target);
     const id = fm.GoogleEventId ? String(fm.GoogleEventId) : '';
     const calPrima = fm.GoogleCalendar ? String(fm.GoogleCalendar) : '';
-    return { file, nome, giorno, hhmm, durata, cat, target, luogo, luogoRaw: fm.Luogo ? String(fm.Luogo) : '', dettagli, id, calPrima, impronta, pending: !id || calPrima !== target || String(fm.GoogleHash || '') !== impronta };
+    return { file, nome, giorno, hhmm, durata, cat, target, over, luogo, luogoRaw: fm.Luogo ? String(fm.Luogo) : '', dettagli, id, calPrima, impronta, pending: !id || calPrima !== target || String(fm.GoogleHash || '') !== impronta };
   }
 
   noteEvent(n) {
@@ -943,7 +945,9 @@ class CalendarView extends ItemView {
     return items.map((it) => ({ ev: it.ev, top: it.smin / 60 * HOUR_PX, height: (it.emin - it.smin) / 60 * HOUR_PX - 1, lane: it.lane, lanes: it.lanes }));
   }
 
-  openEditor(ev, day, withTime) {
+  async openEditor(ev, day, withTime) {
+    // un calendario creato da poco su Google compare subito nell'elenco
+    if (!this.plugin._calAt || Date.now() - this.plugin._calAt > 15000) { try { await this.plugin.loadCalendars(); } catch (e) { /* si usa l'elenco già caricato */ } }
     new EventModal(this.app, this.plugin, ev, day, withTime, async () => { this._keepScroll = true; await this.reload(); }).open();
   }
 }
@@ -1072,6 +1076,13 @@ class EventModal extends Modal {
     }
 
     const card = h('div', 'igc-card', null, contentEl);
+    if (mode === 'note' && f.cat !== CAT_GARA) {
+      const rowCal = h('div', 'igc-field', null, card); h('label', '', 'Calendario', rowCal);
+      const sel = h('select', 'igc-input', null, rowCal);
+      this.plugin.calendars.filter((c) => c.writable || c.id === f.calId).forEach((c) => { const o = h('option', '', c.name, sel); o.value = c.id; if (c.id === f.calId) o.selected = true; });
+      sel.addEventListener('change', () => { f.calId = sel.value; });
+      iosSelect(sel);
+    }
     if (mode === 'google') {
       const rowCal = h('div', 'igc-field', null, card); h('label', '', 'Calendario', rowCal);
       const sel = h('select', 'igc-input', null, rowCal);
@@ -1193,13 +1204,21 @@ class EventModal extends Modal {
     }
   }
 
-  noteText(nome, data, orario, luogo, cat, dettagli, gara, durata) {
+  noteText(nome, data, orario, luogo, cat, dettagli, gara, durata, calendario) {
     const q = (v) => '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
-    const r = ['---', `Nome: ${nome}`, `Data: ${data}`, `Orario: ${orario}`, ...(orario && durata && durata !== 60 ? [`Durata: ${durata}`] : []), `Luogo: ${q(mapsLink(luogo))}`, `Categoria: ${cat}`];
+    const r = ['---', `Nome: ${nome}`, `Data: ${data}`, `Orario: ${orario}`, ...(orario && durata && durata !== 60 ? [`Durata: ${durata}`] : []), `Luogo: ${q(mapsLink(luogo))}`, `Categoria: ${cat}`, ...(calendario ? [`Calendario: ${calendario}`] : [])];
     if (dettagli || !gara) r.push(`Dettagli: ${dettagli}`);
     if (gara) r.push('Risultati:');
     r.push('---', '');
     return r.join('\n');
+  }
+
+  /* calendario scelto per una nota: si scrive solo se diverso da quello che la categoria darebbe da sola */
+  calOverride() {
+    const f = this.f, cfg = this.plugin.cfg || {};
+    const prim = cfg.CALENDARIO_PRINCIPALE || ((this.plugin.calendars.find((c) => c.primary) || {}).id);
+    const def = f.cat === 'Università' ? cfg.CALENDARIO_UNIVERSITY : prim;
+    return f.calId && f.calId !== def ? f.calId : '';
   }
 
   async createNote() {
@@ -1214,7 +1233,7 @@ class EventModal extends Modal {
     await this.ensureFolder(folder);
     let path = `${folder}/${base}.md`;
     if (app.vault.getAbstractFileByPath(path)) path = `${folder}/${base} - ${stamp}.md`;
-    await app.vault.create(path, this.noteText(nome, f.startDate, orario, f.location.trim(), f.cat, f.description.trim(), gara, f.duration));
+    await app.vault.create(path, this.noteText(nome, f.startDate, orario, f.location.trim(), f.cat, f.description.trim(), gara, f.duration, gara ? '' : this.calOverride()));
   }
 
   async editNote() {
@@ -1225,6 +1244,7 @@ class EventModal extends Modal {
       fm.Nome = nome; fm.Data = f.startDate; fm.Orario = orario;
       if (orario && f.duration !== 60) fm.Durata = f.duration; else if ('Durata' in fm) delete fm.Durata;
       fm.Luogo = mapsLink(f.location.trim());
+      if (n.cat !== CAT_GARA) { const ov = this.calOverride(); if (ov) fm.Calendario = ov; else if ('Calendario' in fm) delete fm.Calendario; }
       if (f.description.trim() || 'Dettagli' in fm) fm.Dettagli = f.description.trim();
     });
     if (nome === n.nome && f.startDate === n.giorno) return;
