@@ -372,7 +372,7 @@ module.exports = class IosGcalPlugin extends Plugin {
     }
     if (!list) {
       const cfg = await this.readConfig();
-      const nomi = { PRINCIPALE: 'Principale', SCHERMA: 'Scherma', UNIVERSITY: 'University' };
+      const nomi = { PRINCIPALE: 'Principale', SCHERMA: 'Scherma', UNIVERSITY: 'University', APPELLI: 'Appelli università' };
       const colori = { PRINCIPALE: '#007AFF', SCHERMA: '#FF9500', UNIVERSITY: '#34C759' };
       list = Object.keys(cfg).filter((k) => k.startsWith('CALENDARIO_')).map((k, i) => {
         const key = k.replace('CALENDARIO_', '');
@@ -443,7 +443,7 @@ module.exports = class IosGcalPlugin extends Plugin {
     const hhmm = orarioNorm(fm.Orario);
     const cat = String(fm.Categoria || '').trim();
     const cfg = this.cfg || {};
-    const target = cat === CAT_GARA ? cfg.CALENDARIO_SCHERMA : cfg.CALENDARIO_PRINCIPALE;
+    const target = cat === CAT_GARA ? cfg.CALENDARIO_SCHERMA : (cat === 'Università' ? cfg.CALENDARIO_UNIVERSITY : cfg.CALENDARIO_PRINCIPALE);
     const luogo = luogoTesto(fm.Luogo) || (cat === 'Università' ? LUOGO_UNIVERSITA : '');
     const dettagli = fm.Dettagli ? String(fm.Dettagli) : '';
     const durata = durataNorm(fm.Durata);
