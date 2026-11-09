@@ -361,7 +361,7 @@ module.exports = class IosGcalPlugin extends Plugin {
     try {
       const res = await this.api('GET', '/users/me/calendarList', { minAccessRole: 'reader', maxResults: '250' });
       list = (res.items || []).map((c, i) => ({
-        id: c.id, name: c.summaryOverride || c.summary || c.id,
+        id: c.id, name: c.primary ? 'Personale' : (c.summaryOverride || c.summary || c.id),
         color: c.backgroundColor || PALETTE[i % PALETTE.length],
         writable: c.accessRole === 'owner' || c.accessRole === 'writer', primary: !!c.primary,
       }));
@@ -372,7 +372,7 @@ module.exports = class IosGcalPlugin extends Plugin {
     }
     if (!list) {
       const cfg = await this.readConfig();
-      const nomi = { PRINCIPALE: 'Principale', SCHERMA: 'Scherma', UNIVERSITY: 'University', APPELLI: 'Appelli università' };
+      const nomi = { PRINCIPALE: 'Personale', SCHERMA: 'Scherma', UNIVERSITY: 'University', APPELLI: 'Appelli università' };
       const colori = { PRINCIPALE: '#007AFF', SCHERMA: '#FF9500', UNIVERSITY: '#34C759' };
       list = Object.keys(cfg).filter((k) => k.startsWith('CALENDARIO_')).map((k, i) => {
         const key = k.replace('CALENDARIO_', '');
