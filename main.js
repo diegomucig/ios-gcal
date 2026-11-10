@@ -360,7 +360,7 @@ module.exports = class IosGcalPlugin extends Plugin {
     let list = null;
     try {
       const res = await this.api('GET', '/users/me/calendarList', { minAccessRole: 'reader', maxResults: '250' });
-      list = (res.items || []).map((c, i) => ({
+      list = (res.items || []).filter((c) => !/^family/i.test(c.id) && !/^famiglia$/i.test(String(c.summaryOverride || c.summary || '').trim())).map((c, i) => ({
         id: c.id, name: c.primary ? 'Personale' : (c.summaryOverride || c.summary || c.id),
         color: c.backgroundColor || PALETTE[i % PALETTE.length],
         writable: c.accessRole === 'owner' || c.accessRole === 'writer', primary: !!c.primary,
@@ -453,7 +453,7 @@ module.exports = class IosGcalPlugin extends Plugin {
     const impronta = hashS(JSON.stringify(evento) + '|' + target);
     const id = fm.GoogleEventId ? String(fm.GoogleEventId) : '';
     const calPrima = fm.GoogleCalendar ? String(fm.GoogleCalendar) : '';
-    return { file, nome, giorno, hhmm, durata, cat, target, over, luogo, luogoRaw: fm.Luogo ? String(fm.Luogo) : '', dettagli, id, calPrima, impronta, pending: !id || calPrima !== target || String(fm.GoogleHash || '') !== impronta };
+    return { file, nome, giorno, hhmm, durata, cat, target, over, luogo, luogoRaw: fm.Luogo ? String(fm.Luogo) : '', dettagli, id, calPrima, impronta, pending: giorno >= ymd(new Date()) && (!id || calPrima !== target || String(fm.GoogleHash || '') !== impronta) };
   }
 
   noteEvent(n) {
@@ -471,7 +471,7 @@ module.exports = class IosGcalPlugin extends Plugin {
     files.forEach((f) => {
       const n = this.parseNote(f);
       if (!n) return;
-      if (f.path.startsWith(CESTINO + '/')) { if (n.id && n.giorno >= oggi) { cestino.add(n.id); this.pendingDeletes++; } }
+      if (f.path.startsWith(CESTINO + '/')) { if (n.id && n.giorno >= oggi) { cestino.add(n.id); if (n.calPrima) this.pendingDeletes++; } }
       else attive.push(n);
     });
     const byId = new Map();
@@ -746,7 +746,8 @@ class CalendarView extends ItemView {
       this.syncing = false;
       await this.refresh(true);
       const resto = this.plugin.pendingCount();
-      new Notice(msg || (resto ? `Sincronizzazione finita, ma ${resto} modifiche risultano ancora da inviare.` : 'Sincronizzato con Google Calendar'));
+      const quali = this.plugin._merged.filter((e) => e.note && e.pending).slice(0, 3).map((e) => e.title).join(', ');
+      new Notice(msg || (resto ? `Sincronizzazione finita, ma ${resto} modifiche risultano ancora da inviare${quali ? ': ' + quali : ''}.` : 'Sincronizzato con Google Calendar'));
     };
     this._syncTimer = window.setInterval(() => {
       const dt = Date.now() - t0;
