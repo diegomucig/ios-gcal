@@ -119,7 +119,8 @@
 .igc-field .igc-input { background: transparent; border: none; box-shadow: none; text-align: right; font-size: 14px; max-width: 100%; }
 .igc-field-col .igc-input { text-align: left; background: var(--background-primary); border-radius: 8px; width: 100%; }
 .igc-dt { display: flex; gap: 6px; }
-.igc-maps { display: block; font-size: 13px; padding: 2px 0 10px; color: var(--igc-blue); }
+.igc-maps-row { display: flex; gap: 16px; padding: 2px 0 10px; }
+.igc-maps { display: block; font-size: 13px; color: var(--igc-blue); }
 .igc-m-btns { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .igc-spacer { flex: 1; }
 .igc-primary { background: var(--igc-blue); color: #fff; }

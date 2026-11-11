@@ -75,6 +75,41 @@ function quandoSync(giorno, hhmm, minuti) {
   return { start: { dateTime: f(inizio), timeZone: 'Europe/Rome' }, end: { dateTime: f(fine), timeZone: 'Europe/Rome' } };
 }
 const mapsLink = (t) => (t ? `[${t}](https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t)})` : '');
+
+// Apple Mappe su iPhone/iPad, Google Maps altrove (il link salvato nelle note resta quello di Google, valido ovunque)
+const isApple = () => !!(Platform && (Platform.isIosApp || Platform.isMacOS));
+const mapsUrl = (t) => (isApple()
+  ? 'https://maps.apple.com/?q=' + encodeURIComponent(t)
+  : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(t));
+const dirUrl = (t) => (isApple()
+  ? 'https://maps.apple.com/?dirflg=d&daddr=' + encodeURIComponent(t)
+  : 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(t));
+
+// Ricerca di luoghi reali (OpenStreetMap tramite Photon, gratuito e senza chiavi), con preferenza per la zona di Udine
+const _luoghiCache = new Map();
+function photonLabel(p) {
+  const via = [p.street, p.housenumber].filter(Boolean).join(' ');
+  const citta = [p.postcode, p.city || p.town || p.village || p.district || p.county].filter(Boolean).join(' ');
+  const nome = p.name && p.name !== p.street ? p.name : '';
+  const parti = [nome, via, citta];
+  if (p.country && p.countrycode && p.countrycode !== 'IT') parti.push(p.country);
+  const visti = new Set();
+  return parti.filter((x) => { x = (x || '').trim(); if (!x || visti.has(x.toLowerCase())) return false; visti.add(x.toLowerCase()); return true; }).join(', ');
+}
+async function cercaLuoghi(q) {
+  q = q.trim();
+  if (q.length < 3) return [];
+  const k = q.toLowerCase();
+  if (_luoghiCache.has(k)) return _luoghiCache.get(k);
+  try {
+    const r = await requestUrl({ url: 'https://photon.komoot.io/api/?limit=6&lat=46.06&lon=13.23&q=' + encodeURIComponent(q), throw: false });
+    if (r.status !== 200) return [];
+    const out = [];
+    ((r.json && r.json.features) || []).forEach((f) => { const l = photonLabel(f.properties || {}); if (l && !out.includes(l)) out.push(l); });
+    _luoghiCache.set(k, out);
+    return out;
+  } catch (e) { return []; }
+}
 const safeName = (n) => n.replace(/[\\/:*?"<>|#^\[\]]/g, '').trim();
 function stagione(giorno) {
   const [y, m] = giorno.split('-').map(Number);
@@ -836,7 +871,7 @@ class CalendarView extends ItemView {
     h('div', 'igc-row-title', ev.title + (ev.pending ? '  ↻' : ''), info);
     if (ev.location) {
       const a = h('a', 'igc-row-loc', '📍 ' + ev.location, info);
-      a.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(ev.location);
+      a.href = mapsUrl(ev.location);
       a.addEventListener('click', (e) => e.stopPropagation());
     }
     h('div', 'igc-row-cal', cal.name, info);
@@ -1148,25 +1183,44 @@ class EventModal extends Modal {
 
     const card2 = h('div', 'igc-card', null, contentEl);
     const rl = h('div', 'igc-field', null, card2); h('label', '', 'Luogo', rl);
-    const loc = h('input', 'igc-input', null, rl); loc.type = 'text'; loc.placeholder = mode === 'appello' ? 'Vuoto = Università di Udine' : 'Indirizzo'; loc.value = f.location; loc.addEventListener('input', () => { f.location = loc.value; });
+    const loc = h('input', 'igc-input', null, rl); loc.type = 'text'; loc.placeholder = mode === 'appello' ? 'Vuoto = Università di Udine' : 'Cerca un luogo o un indirizzo'; loc.value = f.location; loc.addEventListener('input', () => { f.location = loc.value; });
     const sug = h('div', 'igc-places', null, card2);
-    const maps = h('a', 'igc-maps', 'Apri in Maps ↗', card2);
-    const aggiornaLuogo = () => {
+    const links = h('div', 'igc-maps-row', null, card2);
+    const maps = h('a', 'igc-maps', 'Apri in Maps ↗', links);
+    const dir = h('a', 'igc-maps', 'Indicazioni ↗', links);
+    let online = [], onlineQ = '', scelto = '', timer = null;
+    const disegna = () => {
       const q = f.location.trim().toLowerCase();
-      maps.style.display = f.location.trim() ? '' : 'none';
-      maps.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(f.location);
+      links.style.display = f.location.trim() ? '' : 'none';
+      maps.href = mapsUrl(f.location); dir.href = dirUrl(f.location);
       sug.empty ? sug.empty() : (sug.innerHTML = '');
-      const lista = q ? this.luoghi.filter((l) => l.toLowerCase() !== q && l.toLowerCase().includes(q)).slice(0, 6) : [];
-      if (!lista.length) { sug.style.display = 'none'; return; }
+      const usati = q ? this.luoghi.filter((l) => l.toLowerCase() !== q && l.toLowerCase().includes(q)).slice(0, 4) : [];
+      const trovati = onlineQ === q ? online.filter((l) => l.toLowerCase() !== q && !usati.includes(l)) : [];
+      if (!usati.length && !trovati.length) { sug.style.display = 'none'; return; }
       sug.style.display = '';
-      h('div', 'igc-places-title', 'Luoghi già usati', sug);
-      lista.forEach((l) => {
-        const b = h('button', 'igc-place', l, sug);
-        b.addEventListener('click', () => { f.location = l; loc.value = l; aggiornaLuogo(); });
-      });
+      const scegli = (l) => { f.location = l; loc.value = l; scelto = l; online = []; onlineQ = ''; disegna(); };
+      if (usati.length) {
+        h('div', 'igc-places-title', 'Luoghi già usati', sug);
+        usati.forEach((l) => h('button', 'igc-place', l, sug).addEventListener('click', () => scegli(l)));
+      }
+      if (trovati.length) {
+        h('div', 'igc-places-title', 'Luoghi trovati su Maps', sug);
+        trovati.forEach((l) => h('button', 'igc-place', '📍 ' + l, sug).addEventListener('click', () => scegli(l)));
+      }
+    };
+    const aggiornaLuogo = () => {
+      disegna();
+      const q = f.location.trim();
+      clearTimeout(timer);
+      if (q.length < 3 || q === scelto) return;
+      timer = setTimeout(async () => {
+        const r = await cercaLuoghi(q);
+        if (f.location.trim() !== q) return; // nel frattempo hai scritto altro
+        online = r; onlineQ = q.toLowerCase(); disegna();
+      }, 450);
     };
     loc.addEventListener('input', aggiornaLuogo);
-    aggiornaLuogo();
+    disegna();
     const rd2 = h('div', 'igc-field igc-field-col', null, card2); h('label', '', mode === 'appello' ? 'Dettagli (es. Primo parziale)' : 'Dettagli', rd2);
     const desc = h('textarea', 'igc-input', null, rd2); desc.rows = mode === 'appello' ? 2 : 4; desc.value = f.description; desc.addEventListener('input', () => { f.description = desc.value; });
 
